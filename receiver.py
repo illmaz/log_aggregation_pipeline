@@ -3,49 +3,69 @@ import json
 import duckdb
 import threading
 import time
+from rich.console import Console
+from rich.table import Table
+from rich.live import Live
+from rich import box
 
 con = duckdb.connect("logs.db")
 
 con.execute("""
-            CREATE TABLE IF NOT EXISTS logs (
-            timestamp TEXT,
-            log_level TEXT,
-            message TEXT
-            )
-        """)
+    CREATE TABLE IF NOT EXISTS logs (
+        timestamp TEXT,
+        log_level TEXT,
+        message TEXT
+    )
+""")
 
 error_count = 0
+total_logs = 0
 lock = threading.Lock()
 THRESHOLD = 3
 WINDOW_SECONDS = 10
+console = Console()
 
-def check_errors():
+def check_errors(live):
     global error_count
     while True:
         time.sleep(WINDOW_SECONDS)
         with lock:
             count = error_count
             error_count = 0
-        if count >= THRESHOLD:
-            print(f"ALERT: {count} errors in the last {WINDOW_SECONDS} seconds")
-        else:
-            print(f"OK: {count} errors in the last {WINDOW_SECONDS} seconds")
 
-checker = threading.Thread(target=check_errors, daemon=True)
-checker.start()
+        status = "ALERT" if count >= THRESHOLD else "OK"
+        recent_logs = con.execute("""
+            SELECT timestamp, log_level, message
+            FROM logs
+            ORDER BY rowid DESC
+            LIMIT 5
+        """).fetchall()
 
+        table = Table(box=box.SIMPLE, title=f"STATUS: {status} | ERRORS: {count} in last {WINDOW_SECONDS}s | TOTAL: {total_logs}")
+        table.add_column("Timestamp", style="cyan")
+        table.add_column("Level", style="white")
+        table.add_column("Message", style="white")
 
+        for log in recent_logs:
+            level_style = "red" if log[1] == "ERROR" else "green"
+            table.add_row(log[0], f"[{level_style}]{log[1]}[/{level_style}]", log[2])
 
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
+        live.update(table)
 
-    entry = json.loads(line)
-    con.execute("INSERT INTO logs VALUES (?, ?, ?)",
-                [entry['timestamp'], entry['level'], entry['message']])
-    print(f"Stored: {entry['timestamp']} | {entry['level']} | {entry['message']}")
+with Live(Table(), refresh_per_second=1) as live:
+    checker = threading.Thread(target=check_errors, args=(live,), daemon=True)
+    checker.start()
 
-    if entry['level'] == 'ERROR':
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+
+        entry = json.loads(line)
+        con.execute("INSERT INTO logs VALUES (?, ?, ?)",
+                    [entry['timestamp'], entry['level'], entry['message']])
+
         with lock:
-            error_count += 1
+            total_logs += 1
+            if entry['level'] == 'ERROR':
+                error_count += 1
