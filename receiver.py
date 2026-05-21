@@ -29,30 +29,33 @@ def check_errors(live):
     con_checker = duckdb.connect("logs.db")
     global error_count
     while True:
-        time.sleep(WINDOW_SECONDS)
-        with lock:
-            count = error_count
-            error_count = 0
-            current_total = total_logs
+        try:
+            time.sleep(WINDOW_SECONDS)
+            with lock:
+                count = error_count
+                error_count = 0
+                current_total = total_logs
 
-        status = "ALERT" if count >= THRESHOLD else "OK"
-        recent_logs = con_checker.execute("""
-            SELECT timestamp, log_level, message
-            FROM logs
-            ORDER BY rowid DESC
-            LIMIT 5
-        """).fetchall()
+            status = "ALERT" if count >= THRESHOLD else "OK"
+            recent_logs = con_checker.execute("""
+                SELECT timestamp, log_level, message
+                FROM logs
+                ORDER BY rowid DESC
+                LIMIT 5
+            """).fetchall()
 
-        table = Table(box=box.SIMPLE, title=f"STATUS: {status} | ERRORS: {count} in last {WINDOW_SECONDS}s | TOTAL: {current_total}")
-        table.add_column("Timestamp", style="cyan")
-        table.add_column("Level", style="white")
-        table.add_column("Message", style="white")
+            table = Table(box=box.SIMPLE, title=f"STATUS: {status} | ERRORS: {count} in last {WINDOW_SECONDS}s | TOTAL: {current_total}")
+            table.add_column("Timestamp", style="cyan")
+            table.add_column("Level", style="white")
+            table.add_column("Message", style="white")
 
-        for log in recent_logs:
-            level_style = "red" if log[1] == "ERROR" else "green"
-            table.add_row(log[0], f"[{level_style}]{log[1]}[/{level_style}]", log[2])
+            for log in recent_logs:
+                level_style = "red" if log[1] == "ERROR" else "green"
+                table.add_row(log[0], f"[{level_style}]{log[1]}[/{level_style}]", log[2])
 
-        live.update(table)
+            live.update(table)
+        except Exception as e:
+            console.print(f"[red]checker error: {e}[/]")
 
 with Live(Table(), refresh_per_second=1) as live:
     checker = threading.Thread(target=check_errors, args=(live,), daemon=True)
@@ -70,12 +73,16 @@ with Live(Table(), refresh_per_second=1) as live:
             except json.JSONDecodeError:
                 continue
 
+            timestamp = entry.get('timestamp', 'unknown')
+            level = entry.get('level', 'unknown')
+            message = entry.get('message', 'unknown')
+
             con.execute("INSERT INTO logs VALUES (?, ?, ?)",
-                        [entry['timestamp'], entry['level'], entry['message']])
+                        [timestamp, level, message])
 
             with lock:
                 total_logs += 1
-                if entry['level'] == 'ERROR':
+                if level == 'ERROR':
                     error_count += 1
     finally:
         con.close()

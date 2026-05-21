@@ -12,11 +12,17 @@ typedef struct {
 
 void escape_json(const char *input, char *output, int output_size) {
     int j = 0;
-    for (int i = 0; input[i] != '\0' && j < output_size - 2; i++) {
-        if (input[i] == '"' || input[i] == '\\') {
-            output[j++] = '\\';
+    for (int i = 0; input[i] != '\0' && j < output_size - 6; i++) {
+        switch (input[i]) {
+            case '"':  output[j++] = '\\'; output[j++] = '"';  break;
+            case '\\': output[j++] = '\\'; output[j++] = '\\'; break;
+            case '\n': output[j++] = '\\'; output[j++] = 'n';  break;
+            case '\r': output[j++] = '\\'; output[j++] = 'r';  break;
+            case '\t': output[j++] = '\\'; output[j++] = 't';  break;
+            case '\b': output[j++] = '\\'; output[j++] = 'b';  break;
+            case '\f': output[j++] = '\\'; output[j++] = 'f';  break;
+            default:   output[j++] = input[i]; break;
         }
-        output[j++] = input[i];
     }
     output[j] = '\0';
 }
@@ -25,7 +31,7 @@ void parse_line(char *line) {
     LogEntry entry;
     char date[16];
     char time[16];
-    char output[512];
+    char output[700];
 
     int parsed = sscanf(line, "%15s %15s %9s %255[^\n]",
                         date, time, entry.level, entry.message);
