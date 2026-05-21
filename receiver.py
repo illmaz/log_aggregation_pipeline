@@ -26,22 +26,24 @@ WINDOW_SECONDS = 10
 console = Console()
 
 def check_errors(live):
+    con_checker = duckdb.connect("logs.db")
     global error_count
     while True:
         time.sleep(WINDOW_SECONDS)
         with lock:
             count = error_count
             error_count = 0
+            current_total = total_logs
 
         status = "ALERT" if count >= THRESHOLD else "OK"
-        recent_logs = con.execute("""
+        recent_logs = con_checker.execute("""
             SELECT timestamp, log_level, message
             FROM logs
             ORDER BY rowid DESC
             LIMIT 5
         """).fetchall()
 
-        table = Table(box=box.SIMPLE, title=f"STATUS: {status} | ERRORS: {count} in last {WINDOW_SECONDS}s | TOTAL: {total_logs}")
+        table = Table(box=box.SIMPLE, title=f"STATUS: {status} | ERRORS: {count} in last {WINDOW_SECONDS}s | TOTAL: {current_total}")
         table.add_column("Timestamp", style="cyan")
         table.add_column("Level", style="white")
         table.add_column("Message", style="white")
@@ -55,17 +57,25 @@ def check_errors(live):
 with Live(Table(), refresh_per_second=1) as live:
     checker = threading.Thread(target=check_errors, args=(live,), daemon=True)
     checker.start()
+    time.sleep(0.5)
 
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
+    try:
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
 
-        entry = json.loads(line)
-        con.execute("INSERT INTO logs VALUES (?, ?, ?)",
-                    [entry['timestamp'], entry['level'], entry['message']])
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
 
-        with lock:
-            total_logs += 1
-            if entry['level'] == 'ERROR':
-                error_count += 1
+            con.execute("INSERT INTO logs VALUES (?, ?, ?)",
+                        [entry['timestamp'], entry['level'], entry['message']])
+
+            with lock:
+                total_logs += 1
+                if entry['level'] == 'ERROR':
+                    error_count += 1
+    finally:
+        con.close()
