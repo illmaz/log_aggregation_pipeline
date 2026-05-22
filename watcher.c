@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 
 typedef struct {
     char timestamp[32];
@@ -86,6 +87,20 @@ int main(int argc, char *argv[]) {
             }
         } else {
             sleep(1);
+
+            struct stat path_stat, fd_stat;
+            if (stat(argv[1], &path_stat) == 0 && fstat(fd, &fd_stat) == 0) {
+                if (path_stat.st_ino != fd_stat.st_ino) {
+                    fprintf(stderr, "Log rotation detected, reopening %s\n", argv[1]);
+                    close(fd);
+                    fd = open(argv[1], O_RDONLY);
+                    if (fd == -1) {
+                        perror("reopen failed");
+                        return 1; 
+                    }
+                    lseek(fd, 0, SEEK_SET);
+                }
+            }
         }
     }
 
