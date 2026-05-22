@@ -25,6 +25,25 @@ THRESHOLD = 3
 WINDOW_SECONDS = 10
 console = Console()
 
+def replay_from_redis():
+    try:
+        with open('last_id.txt', 'r') as f:
+            last_id = f.read().strip()
+    except FileNotFoundError:
+        last_id = '0'
+
+    entries = r.xrange('logs', min=last_id, count=100)
+    if entries:
+        console.print(f"[yellow]Replaying {len(entries)} missed entries from Redis[/]")
+        for entry_id, fields in entries:
+            timestamp = fields.get('timestamp', 'unknown')
+            level = fields.get('level', 'unknown')
+            message = fields.get('message', 'unknown')
+            con.execute("INSERT INTO logs VALUES (CAST(? AS TIMESTAMP), ?, ?)",
+                        [timestamp, level, message])
+            with open('last_id.txt', 'w') as f:
+                       f.write(entry_id)
+
 def check_errors(live):
     con_checker = duckdb.connect("logs.db")
     while True:
@@ -63,6 +82,8 @@ def check_errors(live):
         except Exception as e:
             console.print(f"[red]checker error: {e}[/]")
 
+replay_from_redis()
+
 with Live(Table(), refresh_per_second=1) as live:
     checker = threading.Thread(target=check_errors, args=(live,), daemon=True)
     checker.start()
@@ -86,10 +107,12 @@ with Live(Table(), refresh_per_second=1) as live:
             con.execute("INSERT INTO logs VALUES (CAST(? AS TIMESTAMP), ?, ?)",
                         [timestamp, level, message])
             
-            r.xadd('logs', {
+            entry_id = r.xadd('logs', {
                 'timestamp' : timestamp,
                 'level' : level,
                 'message' : message
             })
+            with open('last_id.txt', 'w') as f:
+                f.write(entry_id)
     finally:
         con.close()
