@@ -50,15 +50,20 @@ void parse_line(char *line) {
     }
 }
 
-int main() {
-    int fd = open("test.log", O_RDONLY);
+int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        fprintf(stderr, "Usage: ./watcher <logfile>\n");
+        return 1;
+    }
+
+    int fd = open(argv[1], O_RDONLY);
     if (fd == -1) {
         perror("open failed");
         return 1;
     }
 
     lseek(fd, 0, SEEK_END);
-    fprintf(stderr, "Watching test.log...\n");
+    fprintf(stderr, "Watching %s...\n", argv[1]);
 
     char buffer[4096];
     char line_buf[4096];
