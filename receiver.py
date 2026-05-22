@@ -44,9 +44,9 @@ def replay_from_redis():
             con.execute("INSERT INTO logs VALUES (CAST(? AS TIMESTAMP), ?, ?)",
                         [timestamp, level, message])
             last_id = entry_id
-            with open('last_id.txt', 'w') as f:
-                f.write(last_id)
             total_replayed += 1
+        with open('last_id.txt', 'w') as f:
+            f.write(last_id)
 
     if total_replayed > 0:
         console.print(f"[yellow]Replayed {total_replayed} missed entries from Redis[/]")
