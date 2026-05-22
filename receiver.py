@@ -7,6 +7,9 @@ from rich.console import Console
 from rich.table import Table
 from rich.live import Live
 from rich import box
+import redis 
+
+r = redis.Redis(decode_responses=True)
 
 con = duckdb.connect("logs.db")
 
@@ -18,9 +21,6 @@ con.execute("""
     )
 """)
 
-error_count = 0
-total_logs = 0
-lock = threading.Lock()
 THRESHOLD = 3
 WINDOW_SECONDS = 10
 console = Console()
@@ -85,5 +85,11 @@ with Live(Table(), refresh_per_second=1) as live:
 
             con.execute("INSERT INTO logs VALUES (CAST(? AS TIMESTAMP), ?, ?)",
                         [timestamp, level, message])
+            
+            r.xadd('logs', {
+                'timestamp' : timestamp,
+                'level' : level,
+                'message' : message
+            })
     finally:
         con.close()

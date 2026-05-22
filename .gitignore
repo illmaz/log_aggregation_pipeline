@@ -3,3 +3,4 @@ test.log
 logs.db
 logs.db.wal
 logs.db-wal
+last_id.txt
