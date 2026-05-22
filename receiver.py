@@ -32,17 +32,24 @@ def replay_from_redis():
     except FileNotFoundError:
         last_id = '0'
 
-    entries = r.xrange('logs', min=last_id, count=100)
-    if entries:
-        console.print(f"[yellow]Replaying {len(entries)} missed entries from Redis[/]")
+    total_replayed = 0
+    while True:
+        entries = r.xrange('logs', min=f"({last_id}", count=100)
+        if not entries:
+            break
         for entry_id, fields in entries:
-            timestamp = fields.get('timestamp', 'unknown')
-            level = fields.get('level', 'unknown')
-            message = fields.get('message', 'unknown')
+            timestamp = fields.get('timestamp')
+            level = fields.get('level', 'UNKNOWN')
+            message = fields.get('message', '')
             con.execute("INSERT INTO logs VALUES (CAST(? AS TIMESTAMP), ?, ?)",
                         [timestamp, level, message])
+            last_id = entry_id
             with open('last_id.txt', 'w') as f:
-                       f.write(entry_id)
+                f.write(last_id)
+            total_replayed += 1
+
+    if total_replayed > 0:
+        console.print(f"[yellow]Replayed {total_replayed} missed entries from Redis[/]")
 
 def check_errors(live):
     con_checker = duckdb.connect("logs.db")
@@ -50,10 +57,10 @@ def check_errors(live):
         try:
             time.sleep(WINDOW_SECONDS)
 
-            count = con_checker.execute("""
+            count = con_checker.execute(f"""
                 SELECT COUNT(*) FROM logs
                 WHERE log_level = 'ERROR'
-                AND timestamp > now() - INTERVAL 10 SECONDS
+                AND timestamp > now() - INTERVAL {WINDOW_SECONDS} SECONDS
             """).fetchone()[0]
 
             total = con_checker.execute("""
@@ -84,6 +91,9 @@ def check_errors(live):
 
 replay_from_redis()
 
+last_id = None
+entries_since_flush = 0
+
 with Live(Table(), refresh_per_second=1) as live:
     checker = threading.Thread(target=check_errors, args=(live,), daemon=True)
     checker.start()
@@ -100,19 +110,30 @@ with Live(Table(), refresh_per_second=1) as live:
             except json.JSONDecodeError:
                 continue
 
-            timestamp = entry.get('timestamp', 'unknown')
-            level = entry.get('level', 'unknown')
-            message = entry.get('message', 'unknown')
+            timestamp = entry.get('timestamp')
+            level = entry.get('level', 'UNKNOWN')
+            message = entry.get('message', '')
 
             con.execute("INSERT INTO logs VALUES (CAST(? AS TIMESTAMP), ?, ?)",
                         [timestamp, level, message])
-            
-            entry_id = r.xadd('logs', {
-                'timestamp' : timestamp,
-                'level' : level,
-                'message' : message
-            })
-            with open('last_id.txt', 'w') as f:
-                f.write(entry_id)
+
+            try:
+                entry_id = r.xadd('logs', {
+                    'timestamp': timestamp,
+                    'level': level,
+                    'message': message
+                })
+                last_id = entry_id
+                entries_since_flush += 1
+                if entries_since_flush >= 100:
+                    with open('last_id.txt', 'w') as f:
+                        f.write(last_id)
+                    entries_since_flush = 0
+            except redis.RedisError as e:
+                console.print(f"[yellow]Redis unavailable, skipping durability: {e}[/]")
+
     finally:
+        if last_id:
+            with open('last_id.txt', 'w') as f:
+                f.write(last_id)
         con.close()

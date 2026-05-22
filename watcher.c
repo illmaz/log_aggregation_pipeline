@@ -22,13 +22,19 @@ void escape_json(const char *input, char *output, int output_size) {
             case '\t': output[j++] = '\\'; output[j++] = 't';  break;
             case '\b': output[j++] = '\\'; output[j++] = 'b';  break;
             case '\f': output[j++] = '\\'; output[j++] = 'f';  break;
-            default:   output[j++] = input[i]; break;
+            default:
+                 if ((unsigned char)input[i] < 0x20) {
+                    j += snprintf(&output[j], output_size - j, "\\u%04x", (unsigned char)input[i]);
+                } else {
+                     output[j++] = input[i];
+                }
+                break;
         }
     }
     output[j] = '\0';
 }
 
-void parse_line(char *line) {
+void parse_line(const char *line) {
     LogEntry entry;
     char date[16];
     char time[16];
@@ -42,8 +48,8 @@ void parse_line(char *line) {
         char escaped_message[512];
         escape_json(entry.message, escaped_message, sizeof(escaped_message));
         snprintf(output, sizeof(output),
-        "{\"timestamp\": \"%s\", \"level\": \"%s\", \"message\": \"%s\"}\n",
-        entry.timestamp, entry.level, escaped_message);
+            "{\"timestamp\": \"%s\", \"level\": \"%s\", \"message\": \"%s\"}\n",
+            entry.timestamp, entry.level, escaped_message);
         if (write(1, output, strlen(output)) == -1) {
             fprintf(stderr, "write failed, exiting\n");
             exit(1);
@@ -85,6 +91,9 @@ int main(int argc, char *argv[]) {
                     }
                 }
             }
+        } else if (bytes_read == -1) {
+            perror("read failed");
+            break;
         } else {
             sleep(1);
 
@@ -96,7 +105,7 @@ int main(int argc, char *argv[]) {
                     fd = open(argv[1], O_RDONLY);
                     if (fd == -1) {
                         perror("reopen failed");
-                        return 1; 
+                        return 1;
                     }
                     lseek(fd, 0, SEEK_SET);
                 }
